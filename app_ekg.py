@@ -5,7 +5,10 @@ import numpy as np
 from scipy.signal import find_peaks
 import streamlit as st
 import plotly.graph_objects as go
-import emd
+# NEW
+from PyEMD import EMD
+imf = EMD()(ecg)  # returns array of shape (n_imfs, n_samples)
+imf = imf.T       # transpose to match old shape (n_samples, n_imfs)
 
 st.set_page_config(layout="wide", page_title="Analiza HRV")
 
