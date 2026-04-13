@@ -3,4 +3,4 @@ numpy
 scipy
 streamlit
 plotly
-emd-signal==1.9.0
+PyEMD
