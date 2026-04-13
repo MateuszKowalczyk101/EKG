@@ -1,6 +1,6 @@
-pandas 
-numpy 
-scipy 
-streamlit 
-plotly 
+pandas
+numpy
+scipy
+streamlit
+plotly
 emd-signal
