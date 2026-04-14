@@ -312,22 +312,40 @@ df_emd = df_active[(df_active["czas"] >= start_rr) & (df_active["czas"] <= start
 
 if len(df_emd) > 100:
     with st.spinner("Przetwarzanie EMD..."):
-        imfs, trend, clean = cached_emd(df_emd["ecg"].values.astype(np.float64).tobytes())
+        imfs, trend, _ = cached_emd(df_emd["ecg"].values.astype(np.float64).tobytes())
     
     with col_emd_l:
         st.write("Wybierz IMF do rekonstrukcji:")
         imf_ops = [f"IMF {i+1}" for i in range(imfs.shape[1])]
         selected = st.multiselect("Składowe", imf_ops, default=imf_ops[:3])
-        st.download_button("Pobierz czyste EKG", data=export_ecg_txt(df_emd["czas"].values, clean), file_name="EKG_EMD.txt")
+        
+        # --- ROZWIĄZANIE PROBLEMU ---
+        # 1. Wyciągamy indeksy z nazw (np. "IMF 1" -> 0, "IMF 2" -> 1)
+        wybrane_indeksy = [int(s.replace("IMF ", "")) - 1 for s in selected]
+        
+        # 2. Dynamiczna rekonstrukcja: sumujemy tylko te IMF, które wybrałeś
+        if wybrane_indeksy:
+            zrekonstruowany_sygnal = np.sum(imfs[:, wybrane_indeksy], axis=1)
+        else:
+            # Zabezpieczenie, jeśli usuniesz wszystko z multiselecta
+            zrekonstruowany_sygnal = np.zeros(len(df_emd)) 
+            
+        st.download_button(
+            "Pobierz czyste EKG", 
+            data=export_ecg_txt(df_emd["czas"].values, zrekonstruowany_sygnal), 
+            file_name="EKG_EMD_Rekonstrukcja.txt"
+        )
 
     with col_emd_r:
         fig_emd_main = go.Figure()
         ex, ey = downsample(df_emd["czas"].values, df_emd["ecg"].values)
         _, et = downsample(df_emd["czas"].values, trend)
-        _, ec = downsample(df_emd["czas"].values, clean)
+        _, ec = downsample(df_emd["czas"].values, zrekonstruowany_sygnal) # <-- Tutaj wjeżdża wyliczony wyżej sygnał
+        
         fig_emd_main.add_trace(go.Scatter(x=ex, y=ey, name="Surowy", line=dict(color=mocny_szary, width=1)))
         fig_emd_main.add_trace(go.Scatter(x=ex, y=et, name="Trend (Niska f)", line=dict(color=lekki_czerwony, width=2)))
-        fig_emd_main.add_trace(go.Scatter(x=ex, y=ec, name="Oczyszczony", line=dict(color=niebieski, width=1)))
+        fig_emd_main.add_trace(go.Scatter(x=ex, y=ec, name="Oczyszczony (Rekonstrukcja)", line=dict(color=niebieski, width=1.5)))
+        
         fig_emd_main.update_layout(height=350, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font=dict(color=bialy))
         st.plotly_chart(fig_emd_main, use_container_width=True)
 
