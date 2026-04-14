@@ -163,12 +163,12 @@ with col_top_right:
 
     # Spoczynek — only selected range, downsampled
     sp_x, sp_y = downsample(df_sp_view["czas"].values, df_sp_view["ecg"].values)
-    fig_compare.add_trace(go.Scatter(x=sp_x, y=sp_y,
+    fig_compare.add_trace(go.Scattergl(x=sp_x, y=sp_y,
         mode="lines", name="Spoczynek", line=dict(color=niebieski, width=1.5)))
 
     # Wysilek — only selected range, downsampled
     wy_x, wy_y = downsample(df_wy_view["czas"].values, df_wy_view["ecg"].values)
-    fig_compare.add_trace(go.Scatter(x=wy_x, y=wy_y,
+    fig_compare.add_trace(go.Scattergl(x=wy_x, y=wy_y,
         mode="lines", name="Wysiłek", line=dict(color=lekki_czerwony, width=1.5)))
 
     fig_compare.update_layout(height=320, margin=dict(l=0, r=0, t=10, b=0),
@@ -216,10 +216,10 @@ with col_rr_right:
     fig_rr_signal = go.Figure()
     # Downsample ECG signal for display — R peaks are always shown in full
     rr_x, rr_y = downsample(df_rr["czas"].values, df_rr["ecg"].values)
-    fig_rr_signal.add_trace(go.Scatter(x=rr_x, y=rr_y,
+    fig_rr_signal.add_trace(go.Scattergl(x=rr_x, y=rr_y,
         mode="lines", name="Sygnał EKG", line=dict(color=bialo_szary, width=1.5)))
     if len(peaks) > 0:
-        fig_rr_signal.add_trace(go.Scatter(
+        fig_rr_signal.add_trace(go.Scattergl(
             x=df_rr["czas"].iloc[peaks], y=df_rr["ecg"].iloc[peaks],
             mode="markers", name="Piki R", marker=dict(color=niebieski, size=7)))
     fig_rr_signal.update_layout(height=260, margin=dict(l=0, r=0, t=10, b=0),
@@ -239,7 +239,7 @@ with col_rr_tab:
 
 with col_rr_tacho:
     fig_tacho = go.Figure()
-    fig_tacho.add_trace(go.Scatter(x=rr_time, y=rr_ms, mode="lines+markers",
+    fig_tacho.add_trace(go.Scattergl(x=rr_time, y=rr_ms, mode="lines+markers",
         line=dict(color=bialy, width=2), marker=dict(color=niebieski, size=6), name="RR"))
     fig_tacho.update_layout(height=260, margin=dict(l=0, r=0, t=10, b=0),
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", showlegend=False,
@@ -364,11 +364,11 @@ with col_emd_right:
         dx, dy   = downsample(emd_result["czas_emd"], emd_result["ecg_detrended"])
 
         fig_emd = go.Figure()
-        fig_emd.add_trace(go.Scatter(x=ex, y=ey,
+        fig_emd.add_trace(go.Scattergl(x=ex, y=ey,
             mode="lines", name="Sygnał surowy", line=dict(color=bialo_szary, width=1.5)))
-        fig_emd.add_trace(go.Scatter(x=bx, y=by,
+        fig_emd.add_trace(go.Scattergl(x=bx, y=by,
             mode="lines", name="Modulacja / trend", line=dict(color=lekki_czerwony, width=2)))
-        fig_emd.add_trace(go.Scatter(x=dx, y=dy,
+        fig_emd.add_trace(go.Scattergl(x=dx, y=dy,
             mode="lines", name="ECG bez modulacji", line=dict(color=niebieski, width=1.5)))
         fig_emd.update_layout(height=320, margin=dict(l=0, r=0, t=10, b=0),
             paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
@@ -385,7 +385,7 @@ with col_emd_right:
         for i in range(n_show):
             ix, iy = downsample(emd_result["czas_emd"], imf[:, i])
             fig_imf_i = go.Figure()
-            fig_imf_i.add_trace(go.Scatter(x=ix, y=iy,
+            fig_imf_i.add_trace(go.Scattergl(x=ix, y=iy,
                 mode="lines", name=f"IMF {i+1}",
                 line=dict(width=1.5, color=imf_colors[i % len(imf_colors)])))
             fig_imf_i.update_layout(
@@ -409,10 +409,10 @@ with col_emd_right:
             ox, oy = downsample(emd_result["czas_emd"], emd_result["ecg_emd"])
 
             fig_recon = go.Figure()
-            fig_recon.add_trace(go.Scatter(x=ox, y=oy,
+            fig_recon.add_trace(go.Scattergl(x=ox, y=oy,
                 mode="lines", name="Sygnał surowy",
                 line=dict(color=bialo_szary, width=1.5)))
-            fig_recon.add_trace(go.Scatter(x=rx, y=ry,
+            fig_recon.add_trace(go.Scattergl(x=rx, y=ry,
                 mode="lines", name=f"Rekonstrukcja ({', '.join(selected_imfs)})",
                 line=dict(color="#2ecc71", width=2)))
             fig_recon.update_layout(
