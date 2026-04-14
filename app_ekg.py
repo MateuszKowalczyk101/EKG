@@ -5,6 +5,7 @@ import numpy as np
 from scipy.signal import find_peaks
 import streamlit as st
 import plotly.graph_objects as go
+import plotly.express as px
 from PyEMD import EMD
 import requests
 import io
@@ -27,12 +28,17 @@ st.markdown(f"""
     .stApp {{ color: {bialy}; }}
     h1, h2, h3, [data-testid="stHeader"] {{ color: {bialy} !important; }}
     [data-testid="stWidgetLabel"] p, label {{ color: {bialy} !important; font-weight: 500 !important; }}
-    p, .stText {{ color: {bialo_szary}; }}
+    p, .stText {{ color: {bialo_szary}; font-size: 16px; }}
+    
     .moja-ramka {{ 
         border-radius:10px; padding:20px; background-color:{czerwony};
         text-align:center; margin-bottom: 20px;
     }}
     .moja-ramka h4 {{ color:{czarny} !important; margin:0; font-weight: bold; }}
+    
+    /* Stylizacja metryk z kodu ziomka */
+    [data-testid="stMetricValue"] {{ font-size: 18px !important; color: {bialy} !important; }}
+    [data-testid="stMetricLabel"] p {{ color: {mocny_szary} !important; }}
     </style>
 """, unsafe_allow_html=True)
 
@@ -46,14 +52,11 @@ def downsample(x, y, max_points=2000):
 
 @st.cache_data
 def load_data_from_drive(file_id):
-    """Pobiera plik z Google Drive korzystając z ID."""
     url = f'https://drive.google.com/uc?export=download&id={file_id}'
     try:
         response = requests.get(url)
         response.raise_for_status()
-        # Dekodowanie zawartości
         raw_data = response.content.decode('cp1250')
-        
         data = pd.read_csv(io.StringIO(raw_data), sep='\t', decimal=',', skiprows=6,
                            header=None, engine='python', on_bad_lines='skip')
         data = data.iloc[:, :2].copy()
@@ -77,25 +80,6 @@ def cached_emd(ecg_bytes):
     else: baseline = imf[:, -1]
     return imf, baseline, ecg_array - baseline
 
-def detect_r_peaks(df_in, distance_ms=500, height=None):
-    # Zakładamy fs = 1000Hz (odstęp 500ms = 500 próbek)
-    peaks, _ = find_peaks(df_in["ecg"].values, distance=500, height=height)
-    return peaks
-
-def compute_rr(czas, peaks):
-    r_times = czas.iloc[peaks].values
-    rr_s = np.diff(r_times)
-    return rr_s, rr_s * 1000, r_times[1:]
-
-def compute_hrv_metrics(rr_ms):
-    if len(rr_ms) < 2: return {"mean_rr": 0, "sdnn": 0, "rmssd": 0, "pnn50": 0, "min_rr": 0, "max_rr": 0}
-    diff_rr = np.diff(rr_ms)
-    return {
-        "mean_rr": np.mean(rr_ms), "sdnn": np.std(rr_ms, ddof=1),
-        "rmssd": np.sqrt(np.mean(diff_rr**2)), "pnn50": 100 * np.sum(np.abs(diff_rr) > 50) / len(diff_rr),
-        "min_rr": np.min(rr_ms), "max_rr": np.max(rr_ms),
-    }
-
 def export_ecg_txt(czas, ecg_clean):
     out_df = pd.DataFrame({"czas[s]": np.round(czas, 6), "ECG": np.round(ecg_clean, 6)})
     return out_df.to_csv(sep="\t", index=False).encode("utf-8")
@@ -112,7 +96,7 @@ if not df_wysilek.empty:
     df_wysilek["ecg"] = df_wysilek["ecg"] / 500
 
 # ── HEADER ───────────────────────────────────────────────────────────────────
-st.markdown(f'<div class="moja-ramka"><h4>Analiza HRV sygnału EKG</h4><p style="color:{bialy};">laboratorium fizyki medycznej</p></div>', unsafe_allow_html=True)
+st.markdown(f'<div class="moja-ramka"><h4>Analiza HRV sygnału EKG</h4><p style="color:{czarny};">laboratorium fizyki medycznej</p></div>', unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # SECTION 1 — Signal preview
@@ -144,36 +128,178 @@ with col_top_right:
                            plot_bgcolor="rgba(0,0,0,0)", font=dict(color=bialy), legend=dict(orientation="h", y=1.1))
     st.plotly_chart(fig_comp, use_container_width=True)
 
-# ══════════════════════════════════════════════════════════════════════════════
-# SECTION 2 — RR analysis
-# ══════════════════════════════════════════════════════════════════════════════
-st.markdown(f'<p style="font-size:18px;font-weight:bold;color:{niebieski};">Analiza RR</p>', unsafe_allow_html=True)
-col_rr_l, col_rr_r = st.columns([1.7, 4.3])
 
-with col_rr_l:
-    sygnal = st.selectbox("Sygnał", ["Spoczynek", "Wysiłek"])
+# ══════════════════════════════════════════════════════════════════════════════
+# SECTION 2 — Identyfikacja załamków R (Nowy design)
+# ══════════════════════════════════════════════════════════════════════════════
+st.markdown("""<hr style="margin-top: 10px;height:5px; border:none; color:#444444; background-color:#444444;" />""", unsafe_allow_html=True)
+
+# Wybór sygnału dla sekcji RR i EMD
+syg_col1, syg_col2, syg_col3 = st.columns([2, 1, 1])
+with syg_col1:
+    sygnal = st.selectbox("Sygnał do analizy szczegółowej (RR i EMD):", ["Spoczynek", "Wysiłek"])
     df_active = df_spoczynek if sygnal == "Spoczynek" else df_wysilek
-    start_rr = st.number_input("Start RR [s]", value=0.0)
-    end_rr = st.number_input("Koniec RR [s]", value=30.0)
-    prog_r = st.number_input("Próg R", value=0.5)
-    df_rr = df_active[(df_active["czas"] >= start_rr) & (df_active["czas"] <= end_rr)].copy()
-    peaks = detect_r_peaks(df_rr, height=prog_r)
-    rr_s, rr_ms, rr_time = compute_rr(df_rr["czas"], peaks)
-    metrics = compute_hrv_metrics(rr_ms)
+with syg_col2:
+    start_rr = st.number_input("Start analizy [s]", value=0.0)
+with syg_col3:
+    end_rr = st.number_input("Koniec analizy [s]", value=60.0)
 
-with col_rr_r:
-    fig_rr = go.Figure()
-    rx, ry = downsample(df_rr["czas"].values, df_rr["ecg"].values)
-    fig_rr.add_trace(go.Scatter(x=rx, y=ry, mode="lines", name="EKG", line=dict(color=bialo_szary, width=1)))
-    fig_rr.add_trace(go.Scatter(x=df_rr["czas"].iloc[peaks], y=df_rr["ecg"].iloc[peaks], mode="markers", name="Piki R", marker=dict(color=niebieski, size=8)))
-    fig_rr.update_layout(height=300, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font=dict(color=bialy))
-    st.plotly_chart(fig_rr, use_container_width=True)
+df_rr_signal = df_active[(df_active["czas"] >= start_rr) & (df_active["czas"] <= end_rr)].copy()
 
-m1, m2, m3, m4 = st.columns(4)
-m1.metric("Średnie RR", f"{metrics['mean_rr']:.1f} ms")
-m2.metric("SDNN", f"{metrics['sdnn']:.1f} ms")
-m3.metric("RMSSD", f"{metrics['rmssd']:.1f} ms")
-m4.metric("pNN50", f"{metrics['pnn50']:.1f} %")
+col1, col2 = st.columns([4, 4.5])
+
+with col1:
+    st.markdown(f'<p style="margin-top: 0px; font-size: 18px; font-weight: bold; color: {niebieski};"> Identyfikacja załamków R i tworzenie szeregu RR</p>', unsafe_allow_html=True)
+
+    col_left, col_right = st.columns([1, 4])
+
+    with col_left:    
+        st.markdown(f"""
+            <div style="background-color: {niebieski}; 
+                border-radius: 10px; 
+                padding: 40px;
+                margin-bottom: -310px; /* Dopasowane z -1820px */
+                height: 230px;
+                border: 0px solid rgba(100,100,100,1);
+            ">
+            </div>
+        """, unsafe_allow_html=True)  
+            
+        lewy, srodek, prawy = st.columns([0.1, 0.9, 0.1])   
+        with srodek:
+            st.markdown('<div style="margin-top: 20px;"></div>', unsafe_allow_html=True)
+            threshold_rr = st.slider("Próg dla pików R:", min_value=0.0, max_value=2.0, value=0.11, step=0.01)
+            distance_rr = st.slider("Dystans między RR:", min_value=0.0, max_value=2000.0, value=450.0, step=10.0)
+
+        sygnal_ecg = df_rr_signal['ecg'].values
+        # Rzutowanie distance na int, bo find_peaks wymaga liczby próbek
+        peaks, _ = find_peaks(sygnal_ecg, distance=int(distance_rr), height=threshold_rr)
+
+    with col_right:    
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=df_rr_signal['czas'], y=df_rr_signal['ecg'], mode='lines', name='Sygnał EKG',
+                                 line=dict(color='#C3E5FF', width=1.5)))
+        fig.add_trace(go.Scatter(
+            x=df_rr_signal['czas'].iloc[peaks] if len(peaks) > 0 else [],
+            y=df_rr_signal['ecg'].iloc[peaks] if len(peaks) > 0 else [],
+            mode='markers', name='Piki R',
+            marker=dict(color=niebieski, size=8, symbol='circle', line=dict(color='white', width=1))
+        ))
+        fig.add_hline(y=threshold_rr, line_dash="dash", line_color="rgba(255,255,255,0.3)", annotation_text="Aktualny próg")
+
+        fig.update_layout(
+            height=200, margin=dict(l=0, r=0, t=10, b=0),
+            paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+            xaxis_title="Czas [s]", yaxis_title="Amplituda [mV]"
+        )
+
+        with st.container(border=True):
+            st.plotly_chart(fig, use_container_width=True)
+
+    # Obliczenia RR
+    czasy_pikow = df_rr_signal['czas'].iloc[peaks].values if len(peaks) > 0 else np.array([])
+    odstepy_rr = np.diff(czasy_pikow)
+    
+    df_rr = pd.DataFrame({
+        '#': range(1, len(odstepy_rr) + 1),
+        'rr_ms': odstepy_rr * 1000, 
+        'rr_s': odstepy_rr          
+    })
+
+    st.markdown(f"""
+        <div style="background-color: {lekki_szary}; 
+            border-radius: 10px; 
+            padding: 40px;
+            margin-bottom: -380px; /* Dopasowane z -1820px */
+            height: 300px;
+            border: 0px solid rgba(100,100,100,1);
+        ">
+        </div>
+    """, unsafe_allow_html=True)  
+    
+    lewy, srodek, prawy = st.columns([0.02, 0.9, 0.02])
+
+    with srodek:
+        fig_rr = go.Figure()
+        if not df_rr.empty:
+            fig_rr.add_trace(go.Scatter(
+                x=czasy_pikow[1:],
+                y=df_rr['rr_ms'].values,
+                mode='lines+markers', name='Odstępy RR',
+                line=dict(color=bialy, width=2), 
+                marker=dict(size=6, color=niebieski, symbol='circle') 
+            ))
+
+        fig_rr.update_layout(
+            paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+            xaxis_title="Czas badania [s]", yaxis_title="Odstęp RR [ms]",
+            template="plotly_dark", hovermode="x unified",
+            margin=dict(l=30, r=20, t=30, b=90), height=300
+        )
+        st.plotly_chart(fig_rr, use_container_width=True)
+    
+with col2:
+    st.markdown(f'<p style="margin-top: 0px; font-size: 18px; font-weight: bold; color:{niebieski};">Histogram</p>', unsafe_allow_html=True)
+
+    st.markdown(f"""
+        <div style="background-color: {lekki_szary}; 
+            border-radius: 10px; 
+            padding: 40px;
+            margin-bottom: -630px; /* Dopasowane z -1820px */
+            height: 550px;
+            border: 0px solid rgba(100,100,100,1);
+        ">
+        </div>
+    """, unsafe_allow_html=True)  
+    
+    lewy, srodek, prawy = st.columns([0.02, 0.9, 0.02])  
+    
+    with srodek:
+        col_rr1, col_rr2 = st.columns([1., 1.8])
+
+        with col_rr1:
+            st.dataframe(df_rr, height=310, use_container_width=True)
+
+        with col_rr2:
+            histogram_bins = st.slider('Histogram', min_value=20, max_value=300, value=180, step=1)
+            
+            if not df_rr.empty:
+                fig_hist = px.histogram(
+                    df_rr, x="rr_ms", nbins=histogram_bins, 
+                    labels={'rr_ms': 'Odstęp RR [ms]'},
+                    color_discrete_sequence=[niebieski], marginal="rug" 
+                )
+                fig_hist.update_layout(
+                    height=250, margin=dict(l=0, r=0, t=0, b=0),
+                    paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+                    xaxis_title="Czas trwania  [ms]", yaxis_title="Częstość", bargap=0.1 
+                )
+                with st.container(border=True):
+                    st.plotly_chart(fig_hist, use_container_width=True)
+            else:
+                st.info("Zbyt mało załamków R do wygenerowania histogramu.")
+    
+        if not df_rr.empty:
+            srednie_rr = df_rr['rr_ms'].mean()
+            sdnn = df_rr['rr_ms'].std()
+            max_rr = df_rr['rr_ms'].max()
+            min_rr = df_rr['rr_ms'].min()
+            liczba_R = df_rr.shape[0]
+        else:
+            srednie_rr = sdnn = max_rr = min_rr = liczba_R = 0
+        
+        st.markdown(f'<hr style="margin-top: 10px;height:5px; border:none; color: {niebieski}; background-color:{niebieski};" />', unsafe_allow_html=True)
+    
+        cola, colb, colc, cold, cole = st.columns([1,1,1,1,2])
+        cola.metric("Średnie RR", f"{srednie_rr:.0f} ms")
+        colb.metric("Std RR", f"{sdnn:.0f} ms")
+        colc.metric("Max RR", f"{max_rr:.0f} ms")        
+        cold.metric("Min RR", f"{min_rr:.0f} ms")
+        cole.metric("Liczba zidentyfikowanych załamków R", f"{liczba_R:.0f}")
+    
+        st.markdown(f'<hr style="margin-top: 10px;height:5px; border:none; color: {niebieski}; background-color:{niebieski};" />', unsafe_allow_html=True)
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # SECTION 3 — EMD (ROZŁOŻENIE NA SKŁADOWE)
@@ -181,6 +307,7 @@ m4.metric("pNN50", f"{metrics['pnn50']:.1f} %")
 st.markdown(f'<p style="font-size:18px;font-weight:bold;color:{niebieski};">Dekompozycja EMD (Częstotliwości)</p>', unsafe_allow_html=True)
 col_emd_l, col_emd_r = st.columns([1.7, 4.3])
 
+# Ograniczenie do 15s zaczynając od start_rr
 df_emd = df_active[(df_active["czas"] >= start_rr) & (df_active["czas"] <= start_rr + 15)].copy()
 
 if len(df_emd) > 100:
@@ -219,4 +346,4 @@ if len(df_emd) > 100:
                                  font=dict(color=bialy, size=10))
             st.plotly_chart(f_imf, use_container_width=True)
 else:
-    st.info("Wybierz zakres czasu w sekcji RR, aby uruchomić EMD.")
+    st.info("Wybierz poprawny zakres czasu w panelu wyżej, aby uruchomić EMD.")
