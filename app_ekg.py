@@ -6,6 +6,8 @@ from scipy.signal import find_peaks
 import streamlit as st
 import plotly.graph_objects as go
 from PyEMD import EMD
+import requests
+import io
 
 # Konfiguracja strony
 st.set_page_config(layout="wide", page_title="Analiza HRV EKG", page_icon="❤️")
@@ -43,17 +45,25 @@ def downsample(x, y, max_points=2000):
     return x[idx], y[idx]
 
 @st.cache_data
-def load_my_data(file_path):
+def load_data_from_drive(file_id):
+    """Pobiera plik z Google Drive korzystając z ID."""
+    url = f'https://drive.google.com/uc?export=download&id={file_id}'
     try:
-        data = pd.read_csv(file_path, sep='\t', decimal=',', skiprows=6,
-            header=None, engine='python', encoding='cp1250', on_bad_lines='skip')
+        response = requests.get(url)
+        response.raise_for_status()
+        # Dekodowanie zawartości
+        raw_data = response.content.decode('cp1250')
+        
+        data = pd.read_csv(io.StringIO(raw_data), sep='\t', decimal=',', skiprows=6,
+                           header=None, engine='python', on_bad_lines='skip')
         data = data.iloc[:, :2].copy()
         data.columns = ['czas', 'ecg']
         data['czas'] = data['czas'].astype(str).str.replace(',', '.', regex=False)
         data['ecg']  = data['ecg'].astype(str).str.replace(',', '.', regex=False)
         data = data.apply(pd.to_numeric, errors='coerce')
         return data.dropna().reset_index(drop=True)
-    except:
+    except Exception as e:
+        st.error(f"Błąd przy pobieraniu pliku (ID: {file_id}): {e}")
         return pd.DataFrame(columns=['czas', 'ecg'])
 
 @st.cache_data
@@ -62,14 +72,14 @@ def cached_emd(ecg_bytes):
     emd_obj = EMD()
     imf = emd_obj(ecg_array).T 
     n_imf = imf.shape[1]
-    # Wybór trendu (częstotliwości najniższe - końcowe IMF)
     if n_imf >= 8: baseline = imf[:, 6] + imf[:, 7]
     elif n_imf >= 2: baseline = imf[:, -1] + imf[:, -2]
     else: baseline = imf[:, -1]
     return imf, baseline, ecg_array - baseline
 
 def detect_r_peaks(df_in, distance_ms=500, height=None):
-    peaks, _ = find_peaks(df_in["ecg"].values, distance=int(500 * 1000 / 1000), height=height)
+    # Zakładamy fs = 1000Hz (odstęp 500ms = 500 próbek)
+    peaks, _ = find_peaks(df_in["ecg"].values, distance=500, height=height)
     return peaks
 
 def compute_rr(czas, peaks):
@@ -90,10 +100,16 @@ def export_ecg_txt(czas, ecg_clean):
     out_df = pd.DataFrame({"czas[s]": np.round(czas, 6), "ECG": np.round(ecg_clean, 6)})
     return out_df.to_csv(sep="\t", index=False).encode("utf-8")
 
+# ── KONFIGURACJA ID PLIKÓW ───────────────────────────────────────────────────
+ID_SPOCZYNEK = "1B_2MfGY_EPqY1dZmbLzHX6j8eod98huA"
+ID_WYSILEK   = "1OJrkeyTIkGPHiTGMYsYIyWGVdo-Tov4t"
+
 # ── DATA LOADING ─────────────────────────────────────────────────────────────
-df_spoczynek = load_my_data("Spoczynek.txt")
-df_wysilek   = load_my_data("Wysilek.txt")
-if not df_wysilek.empty: df_wysilek["ecg"] = df_wysilek["ecg"] / 500
+df_spoczynek = load_data_from_drive(ID_SPOCZYNEK)
+df_wysilek   = load_data_from_drive(ID_WYSILEK)
+
+if not df_wysilek.empty: 
+    df_wysilek["ecg"] = df_wysilek["ecg"] / 500
 
 # ── HEADER ───────────────────────────────────────────────────────────────────
 st.markdown(f'<div class="moja-ramka"><h4>Analiza HRV sygnału EKG</h4><p style="color:{bialy};">laboratorium fizyki medycznej</p></div>', unsafe_allow_html=True)
@@ -101,7 +117,7 @@ st.markdown(f'<div class="moja-ramka"><h4>Analiza HRV sygnału EKG</h4><p style=
 # ══════════════════════════════════════════════════════════════════════════════
 # SECTION 1 — Signal preview
 # ══════════════════════════════════════════════════════════════════════════════
-st.markdown(f'<p style="font-size:18px;font-weight:bold;color:{niebieski};">Podgląd sygnałów</p>', unsafe_allow_html=True)
+st.markdown(f'<p style="font-size:18px;font-weight:bold;color:{niebieski};">Podgląd sygnałów (Google Drive)</p>', unsafe_allow_html=True)
 col_top_left, col_top_mid, col_top_right = st.columns([1.6, 1.6, 4.8])
 
 with col_top_left:
@@ -118,10 +134,12 @@ with col_top_mid:
 
 with col_top_right:
     fig_comp = go.Figure()
-    sx, sy = downsample(df_sp_view["czas"].values, df_sp_view["ecg"].values)
-    fig_comp.add_trace(go.Scatter(x=sx, y=sy, mode="lines", name="Spoczynek", line=dict(color=niebieski)))
-    wx, wy = downsample(df_wy_view["czas"].values, df_wy_view["ecg"].values)
-    fig_comp.add_trace(go.Scatter(x=wx, y=wy, mode="lines", name="Wysiłek", line=dict(color=lekki_czerwony)))
+    if not df_sp_view.empty:
+        sx, sy = downsample(df_sp_view["czas"].values, df_sp_view["ecg"].values)
+        fig_comp.add_trace(go.Scatter(x=sx, y=sy, mode="lines", name="Spoczynek", line=dict(color=niebieski)))
+    if not df_wy_view.empty:
+        wx, wy = downsample(df_wy_view["czas"].values, df_wy_view["ecg"].values)
+        fig_comp.add_trace(go.Scatter(x=wx, y=wy, mode="lines", name="Wysiłek", line=dict(color=lekki_czerwony)))
     fig_comp.update_layout(height=320, margin=dict(l=40, r=10, t=10, b=40), paper_bgcolor="rgba(0,0,0,0)", 
                            plot_bgcolor="rgba(0,0,0,0)", font=dict(color=bialy), legend=dict(orientation="h", y=1.1))
     st.plotly_chart(fig_comp, use_container_width=True)
@@ -163,7 +181,6 @@ m4.metric("pNN50", f"{metrics['pnn50']:.1f} %")
 st.markdown(f'<p style="font-size:18px;font-weight:bold;color:{niebieski};">Dekompozycja EMD (Częstotliwości)</p>', unsafe_allow_html=True)
 col_emd_l, col_emd_r = st.columns([1.7, 4.3])
 
-# Slice dla EMD (15 sekund dla wydajności)
 df_emd = df_active[(df_active["czas"] >= start_rr) & (df_active["czas"] <= start_rr + 15)].copy()
 
 if len(df_emd) > 100:
@@ -174,12 +191,9 @@ if len(df_emd) > 100:
         st.write("Wybierz IMF do rekonstrukcji:")
         imf_ops = [f"IMF {i+1}" for i in range(imfs.shape[1])]
         selected = st.multiselect("Składowe", imf_ops, default=imf_ops[:3])
-        sel_idx = [int(s.split()[1])-1 for s in selected]
-        
         st.download_button("Pobierz czyste EKG", data=export_ecg_txt(df_emd["czas"].values, clean), file_name="EKG_EMD.txt")
 
     with col_emd_r:
-        # Główny wykres EMD
         fig_emd_main = go.Figure()
         ex, ey = downsample(df_emd["czas"].values, df_emd["ecg"].values)
         _, et = downsample(df_emd["czas"].values, trend)
@@ -190,11 +204,9 @@ if len(df_emd) > 100:
         fig_emd_main.update_layout(height=350, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font=dict(color=bialy))
         st.plotly_chart(fig_emd_main, use_container_width=True)
 
-    # --- TUTAJ SĄ TWOJE SKŁADOWE (IMF) ---
     st.write("### Poszczególne składowe sygnału (od wysokich do niskich częstotliwości):")
     n_show = min(imfs.shape[1], 8)
-    cols_imf = st.columns(2) # Rozkład na 2 kolumny dla czytelności
-    
+    cols_imf = st.columns(2)
     imf_colors = ["#0092ff", "#e74c3c", "#2ecc71", "#f39c12", "#9b59b6", "#1abc9c", "#d35400", "#34495e"]
     
     for i in range(n_show):
