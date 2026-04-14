@@ -1,6 +1,6 @@
 [theme]
-base = "dark"
-primaryColor = "#0092ff"
-backgroundColor = "#0e1117"
-secondaryBackgroundColor = "#1e1e1e"
-textColor = "#ffffff"
+primaryColor="#B5B5B5"      # Kolor przycisków i suwaków
+backgroundColor="#2E2E2E"   # Główne tło (np. białe lub jasnoszare)
+secondaryBackgroundColor="#1F1F1F" # Tło sidebaru i widgetów
+textColor="262730#"         # Kolor czcionki
+font = "cambria"
