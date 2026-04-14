@@ -23,7 +23,6 @@ st.markdown(f"""
     <style>
     .stApp {{ color: {czarny}; }}
     h1, h2, h3, [data-testid="stHeader"] {{ color: {bialy} !important; }}
-    p, .stText, [data-testid="stWidgetLabel"] {{ color: {charcoal}; font-size: 16px; }}
     [data-testid="stMetricValue"] {{ font-size: 18px !important; color: {bialy} !important; }}
     [data-testid="stMetricLabel"] p {{ color: {mocny_szary} !important; }}
     </style>
