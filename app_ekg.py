@@ -315,19 +315,33 @@ if len(df_emd) > 100:
         imfs, trend, _ = cached_emd(df_emd["ecg"].values.astype(np.float64).tobytes())
     
     with col_emd_l:
-        st.write("Wybierz IMF do rekonstrukcji:")
-        imf_ops = [f"IMF {i+1}" for i in range(imfs.shape[1])]
-        selected = st.multiselect("Składowe", imf_ops, default=imf_ops[:3])
+        st.write("Opcje rekonstrukcji EMD:")
         
-        # --- ROZWIĄZANIE PROBLEMU ---
-        # 1. Wyciągamy indeksy z nazw (np. "IMF 1" -> 0, "IMF 2" -> 1)
+        # --- NOWOŚĆ: Automatyczny wybór ---
+        auto_mode = st.toggle("🤖 Wybierz składowe automatycznie", value=True)
+        
+        imf_ops = [f"IMF {i+1}" for i in range(imfs.shape[1])]
+        n_imfs = imfs.shape[1]
+        
+        # Logika automatu
+        if auto_mode:
+            # Odrzucamy 1. składową (szum) i 2 ostatnie (pływanie linii)
+            if n_imfs > 3:
+                auto_default = [f"IMF {i+1}" for i in range(1, n_imfs - 2)]
+            else:
+                auto_default = imf_ops # Zabezpieczenie jak sygnał jest za prosty
+                
+            selected = st.multiselect("Wybrane składowe:", imf_ops, default=auto_default, disabled=True)
+            st.caption("Tryb auto: Odrzucono skrajne częstotliwości (szum i pływanie linii).")
+        else:
+            selected = st.multiselect("Wybrane składowe:", imf_ops, default=imf_ops[:3])
+            st.caption("Tryb ręczny: Wybierz samodzielnie.")
+        
         wybrane_indeksy = [int(s.replace("IMF ", "")) - 1 for s in selected]
         
-        # 2. Dynamiczna rekonstrukcja: sumujemy tylko te IMF, które wybrałeś
         if wybrane_indeksy:
             zrekonstruowany_sygnal = np.sum(imfs[:, wybrane_indeksy], axis=1)
         else:
-            # Zabezpieczenie, jeśli usuniesz wszystko z multiselecta
             zrekonstruowany_sygnal = np.zeros(len(df_emd)) 
             
         st.download_button(
@@ -340,7 +354,7 @@ if len(df_emd) > 100:
         fig_emd_main = go.Figure()
         ex, ey = downsample(df_emd["czas"].values, df_emd["ecg"].values)
         _, et = downsample(df_emd["czas"].values, trend)
-        _, ec = downsample(df_emd["czas"].values, zrekonstruowany_sygnal) # <-- Tutaj wjeżdża wyliczony wyżej sygnał
+        _, ec = downsample(df_emd["czas"].values, zrekonstruowany_sygnal)
         
         fig_emd_main.add_trace(go.Scatter(x=ex, y=ey, name="Surowy", line=dict(color=mocny_szary, width=1)))
         fig_emd_main.add_trace(go.Scatter(x=ex, y=et, name="Trend (Niska f)", line=dict(color=lekki_czerwony, width=2)))
