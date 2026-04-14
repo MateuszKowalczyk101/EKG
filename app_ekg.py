@@ -7,7 +7,7 @@ import streamlit as st
 import plotly.graph_objects as go
 from PyEMD import EMD
 
-st.set_page_config(layout="wide")
+st.set_page_config(layout="wide", page_title="Analiza HRV EKG", page_icon="❤️")
 
 bialy          = "#ffffff"
 bialo_szary    = "#aeaeae"
@@ -53,7 +53,8 @@ def load_my_data(file):
 
 # ── IMPROVEMENT 2: cache the expensive EMD call ───────────────────────────────
 @st.cache_data
-def cached_emd(ecg_array):
+def cached_emd(ecg_bytes):
+    ecg_array = np.frombuffer(ecg_bytes, dtype=np.float64)
     emd_obj = EMD()
     imf = emd_obj(ecg_array).T  # PyEMD returns (n_imfs, n_samples), transpose to (n_samples, n_imfs)
     n_imf = imf.shape[1]
@@ -201,10 +202,13 @@ with col_rr_left:
         value=float(df_active["ecg"].max()) * 0.6, step=0.01)
     dystans_r    = st.number_input("Minimalny odstęp między R [ms]", min_value=200, max_value=1200, value=500, step=10)
     liczba_binow = st.number_input("Liczba binów histogramu RR", min_value=5, max_value=50, value=20, step=1)
-    if end_rr < start_rr:
-        st.warning("Koniec zakresu RR musi być większy lub równy początkowi.")
+    if end_rr <= start_rr:
+        st.warning("Koniec zakresu RR musi być większy niż początek.")
     df_rr = df_active[(df_active["czas"] >= start_rr) & (df_active["czas"] <= end_rr)].copy()
-    peaks, _ = detect_r_peaks(df_rr, sampling_rate=1000, distance_ms=int(dystans_r), height=prog_r)
+    if len(df_rr) > 0 and end_rr > start_rr:
+        peaks, _ = detect_r_peaks(df_rr, sampling_rate=1000, distance_ms=int(dystans_r), height=prog_r)
+    else:
+        peaks = np.array([], dtype=int)
     rr_s, rr_ms, rr_time, r_times = compute_rr(df_rr["czas"], peaks)
     metrics = compute_hrv_metrics(rr_ms)
 
@@ -308,12 +312,14 @@ emd_result = None
 
 if len(df_emd) < 100:
     col_emd_left.warning("Za mało danych w wybranym zakresie do EMD.")
+elif end_emd <= start_emd:
+    col_emd_left.warning("Koniec zakresu musi być większy niż początek.")
 else:
     try:
         czas_emd = df_emd["czas"].values
         ecg_emd  = df_emd["ecg"].values
-        # IMPROVEMENT 2: cached — won't rerun if same signal + range
-        imf, baseline, ecg_detrended = cached_emd(ecg_emd)
+        with st.spinner("Obliczanie EMD... ⏳"):
+            imf, baseline, ecg_detrended = cached_emd(ecg_emd.astype(np.float64).tobytes())
         emd_result = dict(czas_emd=czas_emd, ecg_emd=ecg_emd,
                           imf=imf, baseline=baseline, ecg_detrended=ecg_detrended)
     except Exception as e:
